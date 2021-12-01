@@ -3,8 +3,14 @@ package gout
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
+	"mime/multipart"
 	"net/http"
+	"os"
 )
+
+const abortIndex int8 = math.MaxInt8 / 2
 
 // H 用于返回JSON数据
 type H map[string]interface{}
@@ -22,25 +28,32 @@ type Context struct {
 	StatusCode int
 	// 中间件
 	handlers []HandlerFunc
-	index    int
+	index    int8
+	Engine   *Engine
 }
 
 // NewContext 构建上下文实例
-func NewContext(w http.ResponseWriter, r *http.Request) *Context {
+func NewContext(w http.ResponseWriter, r *http.Request, engine *Engine) *Context {
 	return &Context{
 		Req:        r,
 		Writer:     w,
 		StatusCode: 200,
 		Path:       r.URL.Path,
 		Method:     r.Method,
+		Engine:     engine,
 		index:      -1, // 用于记录执行到那个中间件
 	}
+}
+
+func (c *Context) reset() {
+	c.handlers = nil
+	c.index = -1
 }
 
 // Next 所属
 func (c *Context) Next() {
 	c.index++
-	s := len(c.handlers)
+	s := int8(len(c.handlers))
 	for ; c.index < s; c.index++ {
 		c.handlers[c.index](c)
 	}
@@ -48,14 +61,58 @@ func (c *Context) Next() {
 
 // Fail 直接中断响应
 func (c *Context) Fail(code int, err string) {
-	c.index = len(c.handlers)
-
+	c.index = abortIndex
 	c.JSON(code, H{"message": err, "code": http.StatusInternalServerError})
 }
 
 func (c *Context) Param(key string) string {
 	value, _ := c.Params[key]
 	return value
+}
+
+func (c *Context) JsonParse(obj interface{}) error {
+	decoder := json.NewDecoder(c.Req.Body)
+
+	if err := decoder.Decode(obj); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Context) FormFile(name string) (*multipart.FileHeader, error) {
+	if c.Req.MultipartForm == nil {
+		if err := c.Req.ParseMultipartForm(c.Engine.MaxMultipartMemory); err != nil {
+			return nil, err
+		}
+	}
+
+	f, fh, err := c.Req.FormFile(name)
+	if err != nil {
+		return nil, err
+	}
+	err = f.Close()
+	if err != nil {
+		return nil, err
+	}
+	return fh, err
+}
+
+func (c *Context) SaveUploadedFile(file *multipart.FileHeader, dst string) error {
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, src)
+	return err
 }
 
 // Query 获取url的查询参数

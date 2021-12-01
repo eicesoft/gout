@@ -22,6 +22,11 @@ func RouterHook() gout.HandlerFunc {
 	}
 }
 
+type request struct {
+	Id   string `json:"id"`
+	Name string `json:"name"`
+}
+
 func main() {
 	r := gout.New()
 
@@ -59,7 +64,42 @@ func main() {
 				"password": c.PostForm("password"),
 			})
 		})
+
+		v2.POST("/test", func(c *gout.Context) {
+			var req = &request{}
+			d := c.Req.Header.Get("aaa")
+			err := c.JsonParse(req)
+			if err != nil {
+				panic(err)
+			}
+			c.SetHeader("Server", "gout server")
+			c.JSON(http.StatusOK, gout.H{
+				"Id":   req.Id,
+				"Name": req.Name,
+				"DDD":  d,
+			})
+		})
+
+		v2.POST("/file", func(c *gout.Context) {
+			file, err := c.FormFile("file")
+
+			if err != nil {
+				c.Fail(400, err.Error())
+				return
+			}
+
+			err = c.SaveUploadedFile(file, fmt.Sprintf("upload/%s", file.Filename))
+			if err != nil {
+				c.Fail(400, err.Error())
+				return
+			}
+
+			c.JSON(200, gout.H{
+				"file": file.Filename,
+				"size": file.Size,
+			})
+		})
 	}
 
-	_ = r.Run("127.0.0.1:7055")
+	r.Run("127.0.0.1:7055")
 }

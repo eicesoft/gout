@@ -1,21 +1,35 @@
 package gout
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
 type HandlerFunc func(c *Context)
 
+const defaultMultipartMemory = 32 << 21 // 64 MB
+
+const (
+	GET    = "GET"
+	POST   = "POST"
+	DELETE = "DELETE"
+	PUT    = "PUT"
+)
+
 // Engine 作为最顶层
 type Engine struct {
-	http.Handler //实现Handler
-	server       *http.Server
-	*RouterGroup // 具备单个路由的GET POST方法
-	router       *router
-	groups       []*RouterGroup // 存储所有的分组
+	http.Handler       //实现Handler
+	*RouterGroup       // 具备单个路由的GET POST方法
+	server             *http.Server
+	router             *router
+	groups             []*RouterGroup // 存储所有的分组
+	pool               sync.Pool
+	MaxMultipartMemory int64 //MaxMultipartMemory
 }
 
 // RouterGroup 管理各种路由
@@ -28,12 +42,31 @@ type RouterGroup struct {
 
 // New 新建一个 实例
 func New() *Engine {
-	engine := &Engine{router: newRouter()}
+	ui := `
+ ██████╗   ██████╗ ██╗   ██╗████████╗
+ ██╔════╝ ██╔═══██╗██║   ██║╚══██╔══╝
+ ██║  ███╗██║   ██║██║   ██║   ██║   
+ ██║   ██║██║   ██║██║   ██║   ██║   
+ ╚██████╔╝╚██████╔╝╚██████╔╝   ██║   
+  ╚═════╝  ╚═════╝  ╚═════╝    ╚═╝`
+	fmt.Println(ui)
+	engine := &Engine{
+		router:             newRouter(),
+		MaxMultipartMemory: defaultMultipartMemory,
+	}
+
+	engine.pool.New = func() interface{} {
+		return engine.allocateContext()
+	}
 
 	// RouterGroup里面的 engine属性为 自身的engine  确保所有的engine 为一个
 	engine.RouterGroup = &RouterGroup{engine: engine}
 	engine.groups = []*RouterGroup{engine.RouterGroup}
 	return engine
+}
+
+func (engine *Engine) allocateContext() *Context {
+	return &Context{Engine: engine, index: -1, StatusCode: 200}
 }
 
 func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -44,9 +77,17 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			middlewares = append(middlewares, group.middlewares...)
 		}
 	}
-	c := NewContext(w, req)
+	c := engine.pool.Get().(*Context)
+	c.reset()
+	c.Req = req
+	c.Writer = w
+	c.Path = req.URL.Path
+	c.Method = req.Method
+
+	//c := NewContext(w, req, engine)
 	c.handlers = middlewares
 	engine.router.handle(c)
+	engine.pool.Put(c)
 }
 
 func (group *RouterGroup) Use(middleware ...HandlerFunc) {
@@ -86,8 +127,8 @@ func (group *RouterGroup) PUT(pattern string, handler HandlerFunc) {
 	group.addRoute("PUT", pattern, handler)
 }
 
-// Run defines the method to start a http server
-func (engine *Engine) Run(addr string) (err error) {
+// Run Start a http server
+func (engine *Engine) Run(addr string) {
 	log.Printf("Listen in address %s", addr)
 	engine.server = &http.Server{
 		Addr:           addr,
@@ -97,5 +138,20 @@ func (engine *Engine) Run(addr string) (err error) {
 		MaxHeaderBytes: 1 << 28, //256M
 	}
 
-	return engine.server.ListenAndServe()
+	go func() {
+		if err := engine.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("http server startup err %s", err.Error())
+		}
+	}()
+
+	ExitHook().Close(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := engine.server.Shutdown(ctx); err != nil {
+			panic(err)
+		} else {
+			log.Printf("Server is closed.")
+		}
+	})
 }
