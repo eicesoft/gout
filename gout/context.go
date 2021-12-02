@@ -8,12 +8,30 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"sync"
+)
+
+const (
+	_PayloadName = "_payload"
+)
+
+const (
+	ContextTypeHeaderName = "Content-Type"
+)
+
+const (
+	MIMEJSON  = "application/json"
+	MIMEHTML  = "text/html"
+	MIMEXML   = "application/xml"
+	MIMEPlain = "text/plain"
 )
 
 const abortIndex int8 = math.MaxInt8 / 2
 
 // H 用于返回JSON数据
 type H map[string]interface{}
+type ParamMap map[string]string
+type KeyMap map[string]interface{}
 
 // Context 存储请求上下文信息
 type Context struct {
@@ -23,13 +41,16 @@ type Context struct {
 	// 请求信息
 	Path   string
 	Method string
-	Params map[string]string
+	Params ParamMap
 	// 响应信息
 	StatusCode int
 	// 中间件
-	handlers []HandlerFunc
+	handlers HandlersChain
 	index    int8
 	Engine   *Engine
+
+	mu   sync.RWMutex
+	Keys KeyMap
 }
 
 // NewContext 构建上下文实例
@@ -48,6 +69,16 @@ func NewContext(w http.ResponseWriter, r *http.Request, engine *Engine) *Context
 func (c *Context) reset() {
 	c.handlers = nil
 	c.index = -1
+	c.Keys = nil
+}
+
+func (c *Context) init(w http.ResponseWriter, req *http.Request, handlers HandlersChain) {
+	c.Req = req
+	c.Writer = w
+	c.Path = req.URL.Path
+	c.Method = req.Method
+	c.Keys = map[string]interface{}{}
+	c.handlers = handlers
 }
 
 // Next 所属
@@ -68,6 +99,36 @@ func (c *Context) Fail(code int, err string) {
 func (c *Context) Param(key string) string {
 	value, _ := c.Params[key]
 	return value
+}
+
+func (c *Context) Payload(payload interface{}) {
+	c.Set(_PayloadName, payload)
+}
+
+func (c *Context) getPayload() interface{} {
+	if payload, ok := c.Get(_PayloadName); ok {
+		return payload
+	}
+
+	return nil
+}
+
+func (c *Context) Set(key string, value interface{}) {
+	c.mu.Lock()
+	if c.Keys == nil {
+		c.Keys = make(map[string]interface{})
+	}
+
+	c.Keys[key] = value
+	c.mu.Unlock()
+}
+
+// Get returns the value for the given key, ie: (value, true).
+func (c *Context) Get(key string) (value interface{}, exists bool) {
+	c.mu.RLock()
+	value, exists = c.Keys[key]
+	c.mu.RUnlock()
+	return
 }
 
 func (c *Context) JsonParse(obj interface{}) error {
@@ -103,15 +164,25 @@ func (c *Context) SaveUploadedFile(file *multipart.FileHeader, dst string) error
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func(src multipart.File) {
+		err := src.Close()
+		if err != nil {
+			c.Fail(http.StatusBadRequest, err.Error())
+		}
+	}(src)
 
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func(out *os.File) {
+		err := out.Close()
+		if err != nil {
+			c.Fail(http.StatusBadRequest, err.Error())
+		}
+	}(out)
 
-	_, err = io.Copy(out, src)
+	_, err = io.Copy(out, src) //Copy file
 	return err
 }
 
@@ -128,7 +199,7 @@ func (c *Context) PostForm(key string) string {
 // Status 设置状态码
 func (c *Context) Status(code int) {
 	c.StatusCode = code
-	c.Writer.WriteHeader(code)
+	//c.Writer.WriteHeader(code)
 }
 
 // SetHeader 设置header
@@ -136,33 +207,31 @@ func (c *Context) SetHeader(key string, value string) {
 	c.Writer.Header().Set(key, value)
 }
 
+func (c *Context) WriteBody(code int, buf interface{}, contextType string) {
+	if contextType != "" {
+		c.SetHeader(ContextTypeHeaderName, contextType)
+	}
+	c.Status(code)
+	c.Payload(buf)
+}
+
 // 快速构建响应
 // 返回字符串
 func (c *Context) String(code int, format string, values ...interface{}) {
-	c.SetHeader("Content-Type", "text/plain;charset=utf-8")
-	c.Status(code)
-	_, _ = c.Writer.Write([]byte(fmt.Sprintf(format, values...)))
+	c.WriteBody(code, fmt.Sprintf(format, values...), MIMEPlain)
 }
 
 // JSON 返回json数据
 func (c *Context) JSON(code int, obj interface{}) {
-	c.SetHeader("Content-Type", "application/json;charset=utf-8")
-	c.Status(code)
-	encoder := json.NewEncoder(c.Writer)
-	if err := encoder.Encode(obj); err != nil {
-		http.Error(c.Writer, err.Error(), http.StatusInternalServerError)
-	}
+	c.WriteBody(code, obj, MIMEJSON)
 }
 
 // Data 返回字节流数据
 func (c *Context) Data(code int, data []byte) {
-	c.Status(code)
-	_, _ = c.Writer.Write(data)
+	c.WriteBody(code, data, "")
 }
 
 // HTML 返回html数据
 func (c *Context) HTML(code int, html string) {
-	c.SetHeader("Content-Type", "text/html;charset=utf-8")
-	c.Status(code)
-	_, _ = c.Writer.Write([]byte(html))
+	c.WriteBody(code, html, MIMEHTML)
 }

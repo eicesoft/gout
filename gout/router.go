@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const NoFound404 = "404 NOT FOUND: %s\n"
+
 type router struct {
 	roots    map[string]*node
 	handlers map[string]HandlerFunc
@@ -91,9 +93,9 @@ func (r *router) handle(c *Context) {
 		c.Params = params
 		key := c.Method + "-" + n.pattern
 		c.handlers = append(c.handlers, r.handlers[key])
-	} else {
+	} else { //404
 		c.handlers = append(c.handlers, func(c *Context) {
-			c.String(http.StatusNotFound, "404 NOT FOUND: %s\n", c.Path)
+			c.String(http.StatusNotFound, NoFound404, c.Path)
 		})
 	}
 	c.Next()

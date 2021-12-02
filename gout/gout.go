@@ -2,7 +2,7 @@ package gout
 
 import (
 	"context"
-	"fmt"
+	jsoniter "github.com/json-iterator/go"
 	"log"
 	"net/http"
 	"strings"
@@ -10,7 +10,11 @@ import (
 	"time"
 )
 
+// HandlerFunc defines the handler used by middleware.
 type HandlerFunc func(c *Context)
+
+// HandlersChain defines a HandlerFunc array.
+type HandlersChain []HandlerFunc
 
 const defaultMultipartMemory = 32 << 21 // 64 MB
 
@@ -42,14 +46,14 @@ type RouterGroup struct {
 
 // New 新建一个 实例
 func New() *Engine {
-	ui := `
- ██████╗   ██████╗ ██╗   ██╗████████╗
- ██╔════╝ ██╔═══██╗██║   ██║╚══██╔══╝
- ██║  ███╗██║   ██║██║   ██║   ██║   
- ██║   ██║██║   ██║██║   ██║   ██║   
- ╚██████╔╝╚██████╔╝╚██████╔╝   ██║   
-  ╚═════╝  ╚═════╝  ╚═════╝    ╚═╝`
-	fmt.Println(ui)
+	//ui := `
+	//██████╗   ██████╗ ██╗   ██╗████████╗
+	//██╔════╝ ██╔═══██╗██║   ██║╚══██╔══╝
+	//██║  ███╗██║   ██║██║   ██║   ██║
+	//██║   ██║██║   ██║██║   ██║   ██║
+	//╚██████╔╝╚██████╔╝╚██████╔╝   ██║
+	// ╚═════╝  ╚═════╝  ╚═════╝    ╚═╝`
+	//fmt.Println(ui)
 	engine := &Engine{
 		router:             newRouter(),
 		MaxMultipartMemory: defaultMultipartMemory,
@@ -62,7 +66,36 @@ func New() *Engine {
 	// RouterGroup里面的 engine属性为 自身的engine  确保所有的engine 为一个
 	engine.RouterGroup = &RouterGroup{engine: engine}
 	engine.groups = []*RouterGroup{engine.RouterGroup}
+	//pprof.Register(engine)
+	RegisterPProf(engine)
+
 	return engine
+}
+
+func CoreHook() HandlerFunc {
+	return func(c *Context) {
+		defer func() {
+			payload := c.getPayload()
+			if payload != nil {
+				c.Writer.WriteHeader(c.StatusCode)
+				switch payload.(type) {
+				case string:
+					_, _ = c.Writer.Write([]byte(payload.(string)))
+				case []byte:
+					_, _ = c.Writer.Write(payload.([]byte))
+				default:
+
+					b, err := jsoniter.ConfigFastest.Marshal(payload)
+					if err == nil {
+						_, _ = c.Writer.Write(b)
+					} else {
+						c.Fail(http.StatusBadRequest, err.Error())
+					}
+				}
+			}
+		}()
+		c.Next()
+	}
 }
 
 func (engine *Engine) allocateContext() *Context {
@@ -70,7 +103,7 @@ func (engine *Engine) allocateContext() *Context {
 }
 
 func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	var middlewares []HandlerFunc
+	var middlewares HandlersChain
 
 	for _, group := range engine.groups {
 		if strings.HasPrefix(req.URL.Path, group.prefix) {
@@ -79,14 +112,11 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	c := engine.pool.Get().(*Context)
 	c.reset()
-	c.Req = req
-	c.Writer = w
-	c.Path = req.URL.Path
-	c.Method = req.Method
+	c.init(w, req, middlewares)
 
 	//c := NewContext(w, req, engine)
-	c.handlers = middlewares
 	engine.router.handle(c)
+
 	engine.pool.Put(c)
 }
 
@@ -129,6 +159,7 @@ func (group *RouterGroup) PUT(pattern string, handler HandlerFunc) {
 
 // Run Start a http server
 func (engine *Engine) Run(addr string) {
+	engine.Use(CoreHook())
 	log.Printf("Listen in address %s", addr)
 	engine.server = &http.Server{
 		Addr:           addr,

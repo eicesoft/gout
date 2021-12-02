@@ -3,22 +3,20 @@ package main
 import (
 	"fmt"
 	"github.com/eicesoft/web_server/gout"
-	"log"
 	"net/http"
-	"time"
 )
 
 func RouterHook() gout.HandlerFunc {
 	return func(c *gout.Context) {
 		// Start timer
-		t := time.Now()
+		// t := time.Now()
 
 		// 如果错误 可以直接返回
 		//c.Fail(500, "Internal Server Error")
 
 		// 计算请求解析时间
-		c.Next()
-		log.Printf("[%d] %s in %v for group v2", c.StatusCode, c.Req.RequestURI, time.Since(t))
+		// c.Next()
+		// log.Printf("[%d] %s in %v for group v2", c.StatusCode, c.Req.RequestURI, time.Since(t))
 	}
 }
 
@@ -27,13 +25,19 @@ type request struct {
 	Name string `json:"name"`
 }
 
+type response struct {
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data"`
+}
+
 func main() {
 	r := gout.New()
 
 	// 捕获所有异常中间件
 	r.Use(gout.Recovery())
 	// 使用自定义中间件
-	r.Use(RouterHook())
+	// r.Use(RouterHook())
 
 	r.GET("/index", func(c *gout.Context) {
 		names := []string{"test_str"}
@@ -43,7 +47,6 @@ func main() {
 	v1 := r.Group("/v1")
 	{
 		v1.GET("", func(c *gout.Context) {
-			time.Sleep(500)
 			c.HTML(http.StatusOK, "<h1>Hello Gee</h1>")
 		})
 
@@ -57,6 +60,14 @@ func main() {
 		v2.GET("/hello/:name", func(c *gout.Context) {
 			msg := fmt.Sprintf("hello %s, you're at %s", c.Param("name"), c.Path)
 			c.JSON(http.StatusOK, gout.H{"code": 200, "message": msg})
+		})
+		v2.GET("/hello2", func(c *gout.Context) {
+			var resp = &response{
+				200,
+				"test message",
+				"sdgsdg",
+			}
+			c.JSON(http.StatusOK, resp)
 		})
 		v2.POST("/login", func(c *gout.Context) {
 			c.JSON(http.StatusOK, gout.H{
@@ -101,5 +112,5 @@ func main() {
 		})
 	}
 
-	r.Run("127.0.0.1:7055")
+	r.Run(":7055")
 }
