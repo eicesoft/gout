@@ -25,6 +25,14 @@ const (
 	PUT    = "PUT"
 )
 
+var DefaultOption = &Option{
+	false,
+}
+
+type Option struct {
+	IsEnablePProf bool
+}
+
 // Engine 作为最顶层
 type Engine struct {
 	http.Handler       //实现Handler
@@ -45,7 +53,7 @@ type RouterGroup struct {
 }
 
 // New 新建一个 实例
-func New() *Engine {
+func New(option *Option) *Engine {
 	//ui := `
 	//██████╗   ██████╗ ██╗   ██╗████████╗
 	//██╔════╝ ██╔═══██╗██║   ██║╚══██╔══╝
@@ -66,8 +74,10 @@ func New() *Engine {
 	// RouterGroup里面的 engine属性为 自身的engine  确保所有的engine 为一个
 	engine.RouterGroup = &RouterGroup{engine: engine}
 	engine.groups = []*RouterGroup{engine.RouterGroup}
-	//pprof.Register(engine)
-	RegisterPProf(engine)
+
+	if option.IsEnablePProf {
+		WrapPProfHandler(engine)
+	}
 
 	return engine
 }
@@ -80,14 +90,16 @@ func CoreHook() HandlerFunc {
 				c.Writer.WriteHeader(c.StatusCode)
 				switch payload.(type) {
 				case string:
+					//_, _ = c.Writer.Write([]byte(payload.(string)))
 					_, _ = c.Writer.Write([]byte(payload.(string)))
 				case []byte:
+					//_, _ = c.Writer.Write(payload.([]byte))
 					_, _ = c.Writer.Write(payload.([]byte))
 				default:
-
-					b, err := jsoniter.ConfigFastest.Marshal(payload)
+					jsonBytes, err := jsoniter.ConfigFastest.Marshal(payload)
 					if err == nil {
-						_, _ = c.Writer.Write(b)
+						//_, _ = c.Writer.Write(jsonBytes)
+						_, _ = c.Writer.Write(jsonBytes)
 					} else {
 						c.Fail(http.StatusBadRequest, err.Error())
 					}
@@ -99,7 +111,7 @@ func CoreHook() HandlerFunc {
 }
 
 func (engine *Engine) allocateContext() *Context {
-	return &Context{Engine: engine, index: -1, StatusCode: 200}
+	return &Context{Engine: engine, index: -1, StatusCode: 200, value: &Values{}}
 }
 
 func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -110,6 +122,7 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			middlewares = append(middlewares, group.middlewares...)
 		}
 	}
+
 	c := engine.pool.Get().(*Context)
 	c.reset()
 	c.init(w, req, middlewares)
@@ -117,7 +130,7 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	//c := NewContext(w, req, engine)
 	engine.router.handle(c)
 
-	engine.pool.Put(c)
+	defer engine.pool.Put(c)
 }
 
 func (group *RouterGroup) Use(middleware ...HandlerFunc) {
@@ -138,7 +151,7 @@ func (group *RouterGroup) Group(prefix string) *RouterGroup {
 
 func (group *RouterGroup) addRoute(method string, comp string, handler HandlerFunc) {
 	pattern := group.prefix + comp
-	log.Printf("Route %4s - %s", method, pattern)
+	log.Printf("Route add %4s - %s", method, pattern)
 	group.engine.router.addRoute(method, pattern, handler)
 }
 
@@ -159,7 +172,6 @@ func (group *RouterGroup) PUT(pattern string, handler HandlerFunc) {
 
 // Run Start a http server
 func (engine *Engine) Run(addr string) {
-	engine.Use(CoreHook())
 	log.Printf("Listen in address %s", addr)
 	engine.server = &http.Server{
 		Addr:           addr,
@@ -175,7 +187,7 @@ func (engine *Engine) Run(addr string) {
 		}
 	}()
 
-	ExitHook().Close(func() {
+	ExitHook().Close(func() { //处理信号进行关闭
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 

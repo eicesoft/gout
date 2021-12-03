@@ -22,7 +22,7 @@ type hook struct {
 }
 
 // ExitHook create a Hook instance
-func ExitHook(funcs ...func()) Hook {
+func ExitHook() Hook {
 	hook := &hook{
 		quit: make(chan os.Signal, 1),
 	}
@@ -38,13 +38,13 @@ func (h *hook) WithSignals(signals ...syscall.Signal) Hook {
 	return h
 }
 
-func (h *hook) Close(funcs ...func()) {
+func (h *hook) Close(handlers ...func()) {
 	select {
 	case <-h.quit:
 	}
 	signal.Stop(h.quit)
 
-	for _, f := range funcs {
+	for _, f := range handlers {
 		f()
 	}
 }

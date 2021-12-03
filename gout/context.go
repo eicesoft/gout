@@ -1,7 +1,9 @@
 package gout
 
 import (
-	"encoding/json"
+	"github.com/eicesoft/web_server/gout/render"
+	jsoniter "github.com/json-iterator/go"
+
 	"fmt"
 	"io"
 	"math"
@@ -13,6 +15,7 @@ import (
 
 const (
 	_PayloadName = "_payload"
+	_AbortName   = "_abort"
 )
 
 const (
@@ -20,64 +23,101 @@ const (
 )
 
 const (
-	MIMEJSON  = "application/json"
-	MIMEHTML  = "text/html"
-	MIMEXML   = "application/xml"
-	MIMEPlain = "text/plain"
+	MimeJson  = "application/json"
+	MimeHtml  = "text/html"
+	MimeXml   = "application/xml"
+	MimePlain = "text/plain"
 )
 
 const abortIndex int8 = math.MaxInt8 / 2
 
 // H 用于返回JSON数据
 type H map[string]interface{}
+
+// ParamMap 参数类型
 type ParamMap map[string]string
-type KeyMap map[string]interface{}
+
+// dataMap 上下文参数
+type dataMap map[string]interface{}
 
 // Context 存储请求上下文信息
 type Context struct {
-	// 其他对象
-	Writer http.ResponseWriter
-	Req    *http.Request
-	// 请求信息
-	Path   string
-	Method string
-	Params ParamMap
-	// 响应信息
-	StatusCode int
-	// 中间件
-	handlers HandlersChain
-	index    int8
-	Engine   *Engine
-
-	mu   sync.RWMutex
-	Keys KeyMap
+	writermem  responseWriter
+	index      int8           //中间件执行索引
+	value      *Values        //上下文参数
+	handlers   HandlersChain  //中间件数组
+	Writer     ResponseWriter // Writer 响应接口
+	Req        *http.Request  // Req http 请求结构
+	Path       string         // Path 请求路径
+	Method     string         // Method 请求方法
+	Params     ParamMap       // Params 请求参数
+	StatusCode int            //响应状态码
+	Engine     *Engine        //服务器引擎
 }
 
 // NewContext 构建上下文实例
-func NewContext(w http.ResponseWriter, r *http.Request, engine *Engine) *Context {
-	return &Context{
-		Req:        r,
-		Writer:     w,
-		StatusCode: 200,
-		Path:       r.URL.Path,
-		Method:     r.Method,
-		Engine:     engine,
-		index:      -1, // 用于记录执行到那个中间件
-	}
+//func NewContext(w http.ResponseWriter, r *http.Request, engine *Engine) *Context {
+//	return &Context{
+//		Req:        r,
+//		Writer:     w,
+//		StatusCode: 200,
+//		Path:       r.URL.Path,
+//		Method:     r.Method,
+//		Engine:     engine,
+//		index:      -1, // 用于记录执行到那个中间件
+//	}
+//}
+
+// Values defined
+type Values struct {
+	value dataMap      //上下文参数
+	mu    sync.RWMutex //dataMap 同步锁
 }
 
+// IValue Values结构接口实现
+type IValue interface {
+	reset()                                          // reset Values重置
+	Set(key string, value interface{})               // Set 设置hash Key值
+	Get(key string) (value interface{}, exists bool) // Get 获得 Value 对应 key 值
+}
+
+// reset Values重置
+func (d *Values) reset() {
+	d.value = nil
+}
+
+// Set 设置hash Key值
+func (d *Values) Set(key string, value interface{}) {
+	d.mu.Lock()
+	if d.value == nil {
+		d.value = make(map[string]interface{})
+	}
+
+	d.value[key] = value
+	d.mu.Unlock()
+}
+
+// Get 获得 Value 对应 key 值
+func (d *Values) Get(key string) (value interface{}, exists bool) {
+	d.mu.RLock()
+	value, exists = d.value[key]
+	d.mu.RUnlock()
+	return
+} // Values End
+
 func (c *Context) reset() {
+	c.Writer = &c.writermem
 	c.handlers = nil
 	c.index = -1
-	c.Keys = nil
+	c.value.reset()
+	c.Path = ""
 }
 
 func (c *Context) init(w http.ResponseWriter, req *http.Request, handlers HandlersChain) {
 	c.Req = req
-	c.Writer = w
+	c.writermem.ResponseWriter = w
 	c.Path = req.URL.Path
 	c.Method = req.Method
-	c.Keys = map[string]interface{}{}
 	c.handlers = handlers
 }
 
@@ -101,37 +141,20 @@ func (c *Context) Param(key string) string {
 	return value
 }
 
-func (c *Context) Payload(payload interface{}) {
-	c.Set(_PayloadName, payload)
+func (c *Context) payload(payload interface{}) {
+	c.value.Set(_PayloadName, payload)
 }
 
 func (c *Context) getPayload() interface{} {
-	if payload, ok := c.Get(_PayloadName); ok {
+	if payload, ok := c.value.Get(_PayloadName); ok {
 		return payload
 	}
 
 	return nil
 }
 
-func (c *Context) Set(key string, value interface{}) {
-	c.mu.Lock()
-	if c.Keys == nil {
-		c.Keys = make(map[string]interface{})
-	}
-
-	c.Keys[key] = value
-	c.mu.Unlock()
-}
-
-// Get returns the value for the given key, ie: (value, true).
-func (c *Context) Get(key string) (value interface{}, exists bool) {
-	c.mu.RLock()
-	value, exists = c.Keys[key]
-	c.mu.RUnlock()
-	return
-}
-
 func (c *Context) JsonParse(obj interface{}) error {
+	json := jsoniter.ConfigFastest
 	decoder := json.NewDecoder(c.Req.Body)
 
 	if err := decoder.Decode(obj); err != nil {
@@ -199,7 +222,6 @@ func (c *Context) PostForm(key string) string {
 // Status 设置状态码
 func (c *Context) Status(code int) {
 	c.StatusCode = code
-	//c.Writer.WriteHeader(code)
 }
 
 // SetHeader 设置header
@@ -207,31 +229,52 @@ func (c *Context) SetHeader(key string, value string) {
 	c.Writer.Header().Set(key, value)
 }
 
-func (c *Context) WriteBody(code int, buf interface{}, contextType string) {
-	if contextType != "" {
-		c.SetHeader(ContextTypeHeaderName, contextType)
+func bodyAllowedForStatus(status int) bool {
+	switch {
+	case status >= 100 && status <= 199:
+		return false
+	case status == http.StatusNoContent:
+		return false
+	case status == http.StatusNotModified:
+		return false
 	}
+	return true
+}
+
+// Render write response body buffer
+func (c *Context) Render(code int, r render.Render) {
 	c.Status(code)
-	c.Payload(buf)
+	if !bodyAllowedForStatus(code) {
+		r.WriteContentType(c.Writer)
+		c.Writer.WriteHeaderNow()
+		return
+	}
+
+	if err := r.Render(c.Writer); err != nil {
+		panic(err)
+	}
 }
 
-// 快速构建响应
-// 返回字符串
+// String 返回字符串
 func (c *Context) String(code int, format string, values ...interface{}) {
-	c.WriteBody(code, fmt.Sprintf(format, values...), MIMEPlain)
+	c.Render(code, render.Text{Data: fmt.Sprintf(format, values...)})
 }
 
-// JSON 返回json数据
+// JSON 返回Json数据
 func (c *Context) JSON(code int, obj interface{}) {
-	c.WriteBody(code, obj, MIMEJSON)
+	c.Render(code, render.JSON{Data: obj})
 }
 
-// Data 返回字节流数据
-func (c *Context) Data(code int, data []byte) {
-	c.WriteBody(code, data, "")
+// Raw 返回字节流数据
+func (c *Context) Raw(code int, data []byte) {
+	c.Render(code, render.Raw{Data: data})
 }
 
-// HTML 返回html数据
-func (c *Context) HTML(code int, html string) {
-	c.WriteBody(code, html, MIMEHTML)
+// Html 返回html数据
+func (c *Context) Html(code int, html string) {
+	c.Render(code, render.HTML{Data: html})
+}
+
+func (c *Context) Xml(code int, xml interface{}) {
+	c.Render(code, render.XML{Data: xml})
 }

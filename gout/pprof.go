@@ -10,11 +10,11 @@ const (
 	DefaultPrefix = "/debug/pprof"
 )
 
-func RegisterPProf(r *Engine) {
-	RouteRegister(r.RouterGroup)
+func WrapPProfHandler(engine *Engine) {
+	PProfRouteRegister(engine.RouterGroup)
 }
 
-func RouteRegister(rg *RouterGroup) {
+func PProfRouteRegister(rg *RouterGroup) {
 	prefixRouter := rg.Group(DefaultPrefix)
 	{
 		prefixRouter.GET("/", pprofHandler(pprof.Index))
