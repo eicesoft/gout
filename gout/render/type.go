@@ -3,7 +3,11 @@ package render
 import (
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
+	"html/template"
+	"io/ioutil"
 	"net/http"
+	"os"
 )
 
 var (
@@ -94,4 +98,49 @@ func (r XML) Render(w http.ResponseWriter) (err error) {
 
 func (r XML) WriteContentType(w http.ResponseWriter) {
 	writeContentType(w, xmlContentType)
+}
+
+type Redirect struct {
+	Code     int
+	Request  *http.Request
+	Location string
+}
+
+func (r Redirect) Render(w http.ResponseWriter) (err error) {
+	if (r.Code < http.StatusMultipleChoices || r.Code > http.StatusPermanentRedirect) && r.Code != http.StatusCreated {
+		panic(fmt.Sprintf("Cannot redirect with status code %d", r.Code))
+	}
+
+	http.Redirect(w, r.Request, r.Location, r.Code)
+	return
+}
+
+func (r Redirect) WriteContentType(w http.ResponseWriter) {}
+
+type Template struct {
+	Data     interface{}
+	Filename string
+}
+
+func parseTemplateOrPanic(t string) *template.Template {
+	tplParse, err := template.New("html").Delims("[[", "]]").Parse(t)
+	if err != nil {
+		panic(err)
+	}
+	return tplParse
+}
+
+func (r Template) Render(w http.ResponseWriter) (err error) {
+	r.WriteContentType(w)
+	fd, err := os.Open(r.Filename)
+	t, _ := ioutil.ReadAll(fd)
+	fd.Close()
+	tmpl := parseTemplateOrPanic(string(t))
+	err = tmpl.Execute(w, r.Data)
+
+	return
+}
+
+func (r Template) WriteContentType(w http.ResponseWriter) {
+	writeContentType(w, htmlContentType)
 }

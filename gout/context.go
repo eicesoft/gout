@@ -31,9 +31,6 @@ const (
 
 const abortIndex int8 = math.MaxInt8 / 2
 
-// H 用于返回JSON数据
-type H map[string]interface{}
-
 // ParamMap 参数类型
 type ParamMap map[string]string
 
@@ -113,12 +110,11 @@ func (c *Context) reset() {
 	c.Path = ""
 }
 
-func (c *Context) init(w http.ResponseWriter, req *http.Request, handlers HandlersChain) {
+func (c *Context) init(w http.ResponseWriter, req *http.Request) {
 	c.Req = req
-	c.writermem.ResponseWriter = w
+	c.writermem.reset(w)
 	c.Path = req.URL.Path
 	c.Method = req.Method
-	c.handlers = handlers
 }
 
 // Next 所属
@@ -139,18 +135,6 @@ func (c *Context) Fail(code int, err string) {
 func (c *Context) Param(key string) string {
 	value, _ := c.Params[key]
 	return value
-}
-
-func (c *Context) payload(payload interface{}) {
-	c.value.Set(_PayloadName, payload)
-}
-
-func (c *Context) getPayload() interface{} {
-	if payload, ok := c.value.Get(_PayloadName); ok {
-		return payload
-	}
-
-	return nil
 }
 
 func (c *Context) JsonParse(obj interface{}) error {
@@ -275,6 +259,14 @@ func (c *Context) Html(code int, html string) {
 	c.Render(code, render.HTML{Data: html})
 }
 
+func (c *Context) Template(code int, filename string, values interface{}) {
+	c.Render(code, render.Template{Data: values, Filename: filename})
+}
+
 func (c *Context) Xml(code int, xml interface{}) {
 	c.Render(code, render.XML{Data: xml})
+}
+
+func (c *Context) Redirect(code int, location string) {
+	c.Render(-1, render.Redirect{Code: code, Request: c.Req, Location: location})
 }

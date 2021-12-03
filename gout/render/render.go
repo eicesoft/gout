@@ -15,6 +15,8 @@ var (
 	_ Render = Raw{}
 	_ Render = Text{}
 	_ Render = XML{}
+	_ Render = Redirect{}
+	_ Render = Template{}
 )
 
 func writeContentType(w http.ResponseWriter, value []string) {

@@ -2,7 +2,6 @@ package gout
 
 import (
 	"context"
-	jsoniter "github.com/json-iterator/go"
 	"log"
 	"net/http"
 	"strings"
@@ -76,61 +75,36 @@ func New(option *Option) *Engine {
 	engine.groups = []*RouterGroup{engine.RouterGroup}
 
 	if option.IsEnablePProf {
+		log.Printf("* Registry pprof routers - /debug/pprof")
 		WrapPProfHandler(engine)
 	}
 
 	return engine
 }
 
-func CoreHook() HandlerFunc {
-	return func(c *Context) {
-		defer func() {
-			payload := c.getPayload()
-			if payload != nil {
-				c.Writer.WriteHeader(c.StatusCode)
-				switch payload.(type) {
-				case string:
-					//_, _ = c.Writer.Write([]byte(payload.(string)))
-					_, _ = c.Writer.Write([]byte(payload.(string)))
-				case []byte:
-					//_, _ = c.Writer.Write(payload.([]byte))
-					_, _ = c.Writer.Write(payload.([]byte))
-				default:
-					jsonBytes, err := jsoniter.ConfigFastest.Marshal(payload)
-					if err == nil {
-						//_, _ = c.Writer.Write(jsonBytes)
-						_, _ = c.Writer.Write(jsonBytes)
-					} else {
-						c.Fail(http.StatusBadRequest, err.Error())
-					}
-				}
-			}
-		}()
-		c.Next()
-	}
-}
-
 func (engine *Engine) allocateContext() *Context {
 	return &Context{Engine: engine, index: -1, StatusCode: 200, value: &Values{}}
 }
 
-func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (engine *Engine) handleRequest(c *Context) {
 	var middlewares HandlersChain
 
 	for _, group := range engine.groups {
-		if strings.HasPrefix(req.URL.Path, group.prefix) {
+		if strings.HasPrefix(c.Req.URL.Path, group.prefix) {
 			middlewares = append(middlewares, group.middlewares...)
 		}
 	}
+	c.handlers = middlewares
+	engine.router.handle(c)
+}
 
+func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	c := engine.pool.Get().(*Context)
 	c.reset()
-	c.init(w, req, middlewares)
+	c.init(w, req)
+	engine.handleRequest(c)
 
-	//c := NewContext(w, req, engine)
-	engine.router.handle(c)
-
-	defer engine.pool.Put(c)
+	engine.pool.Put(c)
 }
 
 func (group *RouterGroup) Use(middleware ...HandlerFunc) {
@@ -151,23 +125,23 @@ func (group *RouterGroup) Group(prefix string) *RouterGroup {
 
 func (group *RouterGroup) addRoute(method string, comp string, handler HandlerFunc) {
 	pattern := group.prefix + comp
-	log.Printf("Route add %4s - %s", method, pattern)
+	//log.Printf("Route add [%4s] - %s", method, pattern)
 	group.engine.router.addRoute(method, pattern, handler)
 }
 
 // GET 方法直接放在分组路由上
 func (group *RouterGroup) GET(pattern string, handler HandlerFunc) {
-	group.addRoute("GET", pattern, handler)
+	group.addRoute(http.MethodGet, pattern, handler)
 }
 
 // POST 方法同上
 func (group *RouterGroup) POST(pattern string, handler HandlerFunc) {
-	group.addRoute("POST", pattern, handler)
+	group.addRoute(http.MethodPost, pattern, handler)
 }
 
 // PUT PUT路由
 func (group *RouterGroup) PUT(pattern string, handler HandlerFunc) {
-	group.addRoute("PUT", pattern, handler)
+	group.addRoute(http.MethodPut, pattern, handler)
 }
 
 // Run Start a http server
