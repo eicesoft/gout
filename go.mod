@@ -1,4 +1,4 @@
-module github.com/eicesoft/web_server
+module github.com/eicesoft/gout
 
 go 1.17
 

@@ -3,7 +3,7 @@ package gzip
 import (
 	"compress/gzip"
 	"fmt"
-	"github.com/eicesoft/web_server/gout"
+	"github.com/eicesoft/gout/gout"
 	"io/ioutil"
 	"net/http"
 	"path/filepath"

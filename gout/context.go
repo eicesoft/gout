@@ -1,7 +1,7 @@
 package gout
 
 import (
-	"github.com/eicesoft/web_server/gout/render"
+	"github.com/eicesoft/gout/gout/render"
 	jsoniter "github.com/json-iterator/go"
 
 	"fmt"

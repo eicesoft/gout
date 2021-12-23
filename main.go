@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"github.com/eicesoft/web_server/gout"
-	"github.com/eicesoft/web_server/internal/etcd"
+	"github.com/eicesoft/gout/gout"
+	"github.com/eicesoft/gout/internal/etcd"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"log"
 	"net/http"
