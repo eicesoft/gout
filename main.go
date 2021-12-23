@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/eicesoft/web_server/gout"
 	"github.com/eicesoft/web_server/internal/etcd"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -39,7 +40,7 @@ type Values struct {
 
 func main() {
 	rpcClient, err := etcd.NewClient(clientv3.Config{
-		Endpoints:   []string{"172.20.111.230:2379"},
+		Endpoints:   []string{"127.0.0.1:2379"},
 		DialTimeout: 5 * time.Second,
 	})
 
@@ -74,6 +75,18 @@ func main() {
 			c.JSON(200, gout.H{
 				"code": 200,
 				"data": list,
+			})
+		})
+
+		etcdGroup.PUT("/:key", func(c *gout.Context) {
+			key := c.Params["key"]
+			val := c.PostForm("val")
+			xx := c.PostForm("xx")
+			fmt.Println(xx)
+			rpcClient.Set(key, val)
+			c.JSON(200, gout.H{
+				"code":    200,
+				"message": key,
 			})
 		})
 

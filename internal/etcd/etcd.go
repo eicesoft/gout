@@ -2,9 +2,12 @@ package etcd
 
 import (
 	"context"
+	"fmt"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"time"
 )
+
+const ReadTimeout = 5
 
 type Client struct {
 	cli       *clientv3.Client
@@ -25,8 +28,19 @@ type KeyList struct {
 	Value          string `json:"value,omitempty"`
 }
 
+func (c *Client) Set(key string, val string) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*ReadTimeout)
+	defer cancel()
+
+	resp, err := c.cli.Put(ctx, key, val)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(resp)
+}
+
 func (c *Client) List() []*KeyList {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*ReadTimeout)
 	defer cancel()
 
 	resp, err := c.cli.Get(ctx, "", clientv3.WithPrefix(), clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
