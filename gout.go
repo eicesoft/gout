@@ -2,6 +2,7 @@ package gout
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -24,12 +25,8 @@ const (
 	PUT    = "PUT"
 )
 
-var DefaultOption = &Option{
+var DefaultOption = &Options{
 	false,
-}
-
-type Option struct {
-	IsEnablePProf bool
 }
 
 // Engine 作为最顶层
@@ -51,16 +48,16 @@ type RouterGroup struct {
 	engine      *Engine       // 所有的路由分组 共享一个 engine
 }
 
-// New 新建一个 实例
-func New(option *Option) *Engine {
-	//ui := `
-	//██████╗   ██████╗ ██╗   ██╗████████╗
-	//██╔════╝ ██╔═══██╗██║   ██║╚══██╔══╝
-	//██║  ███╗██║   ██║██║   ██║   ██║
-	//██║   ██║██║   ██║██║   ██║   ██║
-	//╚██████╔╝╚██████╔╝╚██████╔╝   ██║
-	// ╚═════╝  ╚═════╝  ╚═════╝    ╚═╝`
-	//fmt.Println(ui)
+// NewServer 新建一个 实例
+func NewServer(opts ...Option) *Engine {
+	ui := `
+	██████╗   ██████╗ ██╗   ██╗████████╗
+	██╔════╝ ██╔═══██╗██║   ██║╚══██╔══╝
+	██║  ███╗██║   ██║██║   ██║   ██║
+	██║   ██║██║   ██║██║   ██║   ██║
+	╚██████╔╝╚██████╔╝╚██████╔╝   ██║
+	╚═════╝  ╚═════╝  ╚═════╝    ╚═╝`
+	fmt.Println(ui)
 	engine := &Engine{
 		router:             newRouter(),
 		MaxMultipartMemory: defaultMultipartMemory,
@@ -74,7 +71,8 @@ func New(option *Option) *Engine {
 	engine.RouterGroup = &RouterGroup{engine: engine}
 	engine.groups = []*RouterGroup{engine.RouterGroup}
 
-	if option.IsEnablePProf {
+	options := newOptions(opts...)
+	if options.IsEnablePProf {
 		log.Printf("* Registry pprof routers - /debug/pprof")
 		WrapPProfHandler(engine)
 	}

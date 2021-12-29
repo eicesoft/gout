@@ -1,16 +1,15 @@
-package main
+package gout
 
 import (
 	"fmt"
-	"github.com/eicesoft/gout/gout"
 	"log"
 	"net/http"
 	"time"
 )
 
 // RouterHook 测试中间件
-func RouterHook() gout.HandlerFunc {
-	return func(c *gout.Context) {
+func RouterHook() HandlerFunc {
+	return func(c *Context) {
 		// Start timer
 		t := time.Now()
 		// 计算请求解析时间
@@ -33,39 +32,39 @@ type response struct {
 
 func main() {
 	//r := gout.New(gout.DefaultOption)
-	r := gout.New(&gout.Option{
+	r := New(&Option{
 		IsEnablePProf: true,
 	})
 
 	r.Use(
-		gout.Recovery(),
+		Recovery(),
 		//gzip.Gzip(gzip.DefaultCompression),
 		//RouterHook(),
 	)
 
-	r.GET("/index", func(c *gout.Context) {
+	r.GET("/index", func(c *Context) {
 		names := []string{"test_str"}
 		c.String(http.StatusOK, names[100])
 	})
 
 	v1 := r.Group("/v1")
 	{
-		v1.GET("", func(c *gout.Context) {
+		v1.GET("", func(c *Context) {
 			c.Html(http.StatusOK, "<h1>Hello Gee</h1>")
 		})
 
-		v1.GET("/hello", func(c *gout.Context) {
+		v1.GET("/hello", func(c *Context) {
 			c.String(http.StatusOK, "hello %s, you're at %s\n", c.Query("name"), c.Path)
 		})
 	}
 
 	v2 := r.Group("/v2")
 	{
-		v2.GET("/hello/:name", func(c *gout.Context) {
+		v2.GET("/hello/:name", func(c *Context) {
 			msg := fmt.Sprintf("hello %s, you're at %s", c.Param("name"), c.Path)
-			c.JSON(http.StatusOK, gout.H{"code": 200, "message": msg})
+			c.JSON(http.StatusOK, H{"code": 200, "message": msg})
 		})
-		v2.GET("/hello2", func(c *gout.Context) {
+		v2.GET("/hello2", func(c *Context) {
 			var resp = &response{
 				200,
 				"test message,test message",
@@ -74,7 +73,7 @@ func main() {
 			c.JSON(http.StatusOK, resp)
 		})
 
-		v2.GET("/xml", func(c *gout.Context) {
+		v2.GET("/xml", func(c *Context) {
 			var resp = &response{
 				200,
 				"test message",
@@ -83,18 +82,18 @@ func main() {
 			c.Xml(http.StatusOK, resp)
 		})
 
-		v2.GET("/r", func(c *gout.Context) {
+		v2.GET("/r", func(c *Context) {
 			c.Redirect(http.StatusMovedPermanently, "https://www.baidu.com")
 		})
 
-		v2.POST("/login", func(c *gout.Context) {
-			c.JSON(http.StatusOK, gout.H{
+		v2.POST("/login", func(c *Context) {
+			c.JSON(http.StatusOK, H{
 				"username": c.PostForm("username"),
 				"password": c.PostForm("password"),
 			})
 		})
 
-		v2.POST("/test", func(c *gout.Context) {
+		v2.POST("/test", func(c *Context) {
 			var req = &request{}
 			d := c.Req.Header.Get("aaa")
 			err := c.JsonParse(req)
@@ -102,14 +101,14 @@ func main() {
 				panic(err)
 			}
 			c.SetHeader("Server", "gout server")
-			c.JSON(http.StatusOK, gout.H{
+			c.JSON(http.StatusOK, H{
 				"Id":   req.Id,
 				"Name": req.Name,
 				"DDD":  d,
 			})
 		})
 
-		v2.POST("/file", func(c *gout.Context) {
+		v2.POST("/file", func(c *Context) {
 			file, err := c.FormFile("file")
 
 			if err != nil {
@@ -123,7 +122,7 @@ func main() {
 				return
 			}
 
-			c.JSON(200, gout.H{
+			c.JSON(200, H{
 				"file": file.Filename,
 				"size": file.Size,
 			})
