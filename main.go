@@ -32,9 +32,7 @@ type response struct {
 
 func main() {
 	//r := gout.New(gout.DefaultOption)
-	r := New(&Option{
-		IsEnablePProf: true,
-	})
+	r := NewServer()
 
 	r.Use(
 		Recovery(),
