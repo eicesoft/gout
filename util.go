@@ -18,3 +18,12 @@ func WrapH(h http.Handler) HandlerFunc {
 		h.ServeHTTP(c.Writer, c.Req)
 	}
 }
+
+func filterFlags(content string) string {
+	for i, char := range content {
+		if char == ' ' || char == ';' {
+			return content[:i]
+		}
+	}
+	return content
+}

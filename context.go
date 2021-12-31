@@ -1,10 +1,9 @@
 package gout
 
 import (
-	"github.com/eicesoft/gout/gout/render"
-	jsoniter "github.com/json-iterator/go"
-
+	"encoding/json"
 	"fmt"
+	"github.com/eicesoft/gout/render"
 	"io"
 	"math"
 	"mime/multipart"
@@ -13,23 +12,13 @@ import (
 	"sync"
 )
 
-const (
-	_PayloadName = "_payload"
-	_AbortName   = "_abort"
-)
-
-const (
-	ContextTypeHeaderName = "Content-Type"
-)
-
-const (
-	MimeJson  = "application/json"
-	MimeHtml  = "text/html"
-	MimeXml   = "application/xml"
-	MimePlain = "text/plain"
-)
-
 const abortIndex int8 = math.MaxInt8 / 2
+const defaultMemory = 32 << 20
+
+const (
+	MIMEJson              = "application/json"
+	MIMEMultipartPOSTForm = "multipart/form-data"
+)
 
 // ParamMap 参数类型
 type ParamMap map[string]string
@@ -126,19 +115,12 @@ func (c *Context) Next() {
 	}
 }
 
-// Fail 直接中断响应
-func (c *Context) Fail(code int, err string) {
-	c.index = abortIndex
-	c.JSON(code, H{"message": err, "code": http.StatusInternalServerError})
-}
-
 func (c *Context) Param(key string) string {
 	value, _ := c.Params[key]
 	return value
 }
 
 func (c *Context) JsonParse(obj interface{}) error {
-	json := jsoniter.ConfigFastest
 	decoder := json.NewDecoder(c.Req.Body)
 
 	if err := decoder.Decode(obj); err != nil {
@@ -269,4 +251,78 @@ func (c *Context) Xml(code int, xml interface{}) {
 
 func (c *Context) Redirect(code int, location string) {
 	c.Render(-1, render.Redirect{Code: code, Request: c.Req, Location: location})
+}
+
+func (c *Context) Success(data interface{}) {
+	c.JSON(http.StatusOK, &H{
+		"code":    200,
+		"data":    data,
+		"message": "",
+	})
+}
+
+// Fail 直接中断响应
+func (c *Context) Fail(code int, err string) {
+	c.index = abortIndex
+	c.JSON(http.StatusInternalServerError, H{"message": err, "code": code})
+}
+
+func (c *Context) shouldBindWith(obj interface{}, b Binding) error {
+	return b.Bind(c.Req, obj)
+}
+
+func (c *Context) mustBindWith(obj interface{}, b Binding) error {
+	if err := c.shouldBindWith(obj, b); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Context) GetHeader(key string) string {
+	return c.Req.Header.Get(key)
+}
+
+func (c *Context) ContentType() string {
+	return filterFlags(c.GetHeader("Content-Type"))
+}
+
+func (c *Context) Bind(obj interface{}) error {
+	b := Default(c.Req.Method, c.ContentType())
+	return c.mustBindWith(obj, b)
+}
+
+func Default(method, contentType string) Binding {
+	if method == http.MethodGet {
+		return QueryBind
+	} else {
+		switch contentType {
+		case MIMEJson:
+			return JsonBind
+		case MIMEMultipartPOSTForm:
+			return FormMultipartBind
+		default:
+			return FormBind
+		}
+	}
+}
+
+func (c *Context) BindForm(obj interface{}) error {
+	return c.mustBindWith(obj, FormBind)
+}
+
+func (c *Context) BindJson(obj interface{}) error {
+	return c.mustBindWith(obj, JsonBind)
+}
+
+func (c *Context) BindQuery(obj interface{}) error {
+	return c.mustBindWith(obj, QueryBind)
+}
+
+func (c *Context) BindFormPost(obj interface{}) error {
+	return c.mustBindWith(obj, FormPostBind)
+}
+
+func (c *Context) BindFormMultipart(obj interface{}) error {
+	return c.mustBindWith(obj, FormMultipartBind)
 }
